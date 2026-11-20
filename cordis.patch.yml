@@ -1,6 +1,6 @@
 - insert:
-    - id: deepseek-doc-parse
-      name: deepseek-doc-parse
+    - id: dsh-official-file-parse
+      name: dsh-official-file-parse
       config:
         baseURL: https://api.deepseek.com
         apiKeyEnv: DEEPSEEK_API_KEY

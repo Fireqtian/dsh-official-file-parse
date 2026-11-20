@@ -1,4 +1,4 @@
-# deepseek-doc-parse
+# dsh-official-file-parse
 
 English | [简体中文](README.md)
 
@@ -12,7 +12,7 @@ Document parsing for DeepSeek Harness: upload a local PDF, Word, or PowerPoint f
 A standard DSH bundle: `package.json` declares a Host row through `dsh.bundle.patch`, and `index.js` registers both tools with `ctx.tools.register()`.
 
 ```sh
-git clone https://github.com/Fireqtian/deepseek-doc-parse.git
+git clone https://github.com/Fireqtian/dsh-official-file-parse.git
 ```
 
 Then in Harness choose **Plugins → Add plugin → local directory** and select the cloned folder. Once published to npm, the package name alone is enough for the plugin manager or `dsh plugin --profile <name> add`. New sessions get the tools; after editing the code, disable/enable the row (or restart) to load the new module generation.

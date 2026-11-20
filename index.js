@@ -11,7 +11,7 @@
  * resolves the harness packages from the dsh installation, and the plain tool
  * object accepted by `ctx.tools.register()` needs no harness imports.
  *
- * @module @local/deepseek-doc-parse
+ * @module @local/dsh-official-file-parse
  */
 
 import { createHash } from 'node:crypto'
@@ -20,7 +20,7 @@ import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, join, resolve as resolvePath } from 'node:path'
 
 /** Plugin name shown in diagnostics. */
-export const name = 'deepseek-doc-parse'
+export const name = 'dsh-official-file-parse'
 
 /** The tools service supplies `ctx.tools`; everything else is optional. */
 export const inject = ['tools']
@@ -80,7 +80,7 @@ function dshHome() {
 
 /** On-disk cache path for uploaded file ids. */
 function cachePath() {
-  return join(dshHome(), 'deepseek-doc-parse', 'files.json')
+  return join(dshHome(), 'dsh-official-file-parse', 'files.json')
 }
 
 /** Read the cache, tolerating a missing or corrupt file. */
@@ -101,7 +101,7 @@ async function writeCache(cache) {
   const path = cachePath()
   const temporary = `${path}.${process.pid}.tmp`
   try {
-    await mkdir(join(dshHome(), 'deepseek-doc-parse'), { recursive: true })
+    await mkdir(join(dshHome(), 'dsh-official-file-parse'), { recursive: true })
     await writeFile(temporary, JSON.stringify(cache, null, 2), 'utf8')
     await rename(temporary, path)
   } catch {

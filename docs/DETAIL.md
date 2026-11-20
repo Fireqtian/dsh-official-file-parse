@@ -1,4 +1,4 @@
-# DeepSeek 文档解析
+# DeepSeek 官方文件解析
 
 通过官方 DeepSeek 文档解析 API（Files API + Anthropic 兼容 Messages）读取本地 PDF、Word、PowerPoint，并把解析结果交给 `deepseek-flash` 回答关于它的问题。解析方式与 DeepSeek 官方 Chat Demo（`deepseek-ai/chat-demo`）完全一致。
 
@@ -44,7 +44,7 @@ Harness 的 DeepSeek 适配器目前只接受 `text` 与 `image` 两种内容块
 - 单文件最大 100 MiB、最多 1000 页；只接受 PDF、DOC、DOCX、PPT、PPTX。纯文本、Markdown、图片不经过此 API，用普通读文件/图片工具即可。
 - 上传时按页计费，之后每次提问只计 token。同一文件（内容 sha256 + 解析模式 + API 主机相同）会复用已上传的 `file_id`，不重复解析；删除缓存或换模式会重新上传。
 - 官方说明：文档里的图由版面分析自动裁出，**不保证每张图都被识别**；未裁出的图模型看不到。需要逐图确认时，用 `rich_layout_recognition` 并在问题里点名图号。
-- 上传缓存位于 `~/.dsh/deepseek-doc-parse/files.json`，只保存 `file_id` 与文件名，不保存文档内容。
+- 上传缓存位于 `~/.dsh/dsh-official-file-parse/files.json`，只保存 `file_id` 与文件名，不保存文档内容。
 
 ## 验证情况
 

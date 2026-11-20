@@ -1,4 +1,4 @@
-# deepseek-doc-parse
+# dsh-official-file-parse
 
 [English](README.en.md) | 简体中文
 
@@ -16,10 +16,10 @@ DeepSeek Harness 的文档解析插件：把本地 PDF、Word、PowerPoint 通�
 **方式一：本地目录**（最简单）
 
 ```sh
-git clone https://github.com/Fireqtian/deepseek-doc-parse.git
+git clone https://github.com/Fireqtian/dsh-official-file-parse.git
 ```
 
-然后在 Harness 打开 **插件 → 添加插件 → 选择本地目录**（或插件页的“从本地目录安装”），指向 clone 下来的 `deepseek-doc-parse` 目录。安装后插件行 `deepseek-doc-parse` 出现并自动生效。
+然后在 Harness 打开 **插件 → 添加插件 → 选择本地目录**（或插件页的“从本地目录安装”），指向 clone 下来的 `dsh-official-file-parse` 目录。安装后插件行 `dsh-official-file-parse` 出现并自动生效。
 
 > 也可以把该包发布到 npm 后按包名安装；插件管理器与 `dsh plugin --profile <name> add` 都会把包安装进 profile。
 
@@ -71,7 +71,7 @@ document_files(action="delete", fileId="file-api-...")
 
 - `POST /anthropic/v1/files`：multipart 上传，`purpose` 必须排在 `file` 之前；服务端解析完成后才返回 `file_id`。
 - `POST /anthropic/v1/messages`：内容块 `{type:'document', source:{type:'file', file_id}}` + 问题文本，`anthropic-beta: files-api-2025-04-14`。
-- 按 `sha256(文件内容) + purpose + API 主机` 缓存 `file_id`（`~/.dsh/deepseek-doc-parse/files.json`），同一文件不会重复解析计费；缓存 id 失效时自动重传一次。
+- 按 `sha256(文件内容) + purpose + API 主机` 缓存 `file_id`（`~/.dsh/dsh-official-file-parse/files.json`），同一文件不会重复解析计费；缓存 id 失效时自动重传一次。
 - 文件通过 Harness 的 `ctx.fs` 读取（遵守沙箱与观察策略），仅在服务缺失时回退 Node `fs`。
 - 只依赖 Node 内置模块，不引入任何 `@deepseek-ai/*` 依赖，避免插件与宿主版本耦合。
 

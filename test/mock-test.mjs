@@ -3,7 +3,7 @@
  * Verifies the multipart field order, the document block shape, SSE parsing,
  * the upload cache key, and list/delete calls without touching the real API.
  *
- * Run: node plugins/deepseek-doc-parse/test/mock-test.mjs
+ * Run: node plugins/dsh-official-file-parse/test/mock-test.mjs
  */
 import { createServer } from 'node:http'
 import assert from 'node:assert/strict'

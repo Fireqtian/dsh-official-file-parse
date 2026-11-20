@@ -1,5 +1,5 @@
 {
-  "name": "deepseek-doc-parse",
+  "name": "dsh-official-file-parse",
   "version": "0.1.0",
   "description": "Official DeepSeek document parsing (Files API) for DeepSeek Harness: parse PDF/Word/PowerPoint with figures and layout kept, then answer questions about them.",
   "type": "module",
@@ -32,11 +32,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Fireqtian/deepseek-doc-parse.git"
+    "url": "git+https://github.com/Fireqtian/dsh-official-file-parse.git"
   },
-  "homepage": "https://github.com/Fireqtian/deepseek-doc-parse#readme",
+  "homepage": "https://github.com/Fireqtian/dsh-official-file-parse#readme",
   "bugs": {
-    "url": "https://github.com/Fireqtian/deepseek-doc-parse/issues"
+    "url": "https://github.com/Fireqtian/dsh-official-file-parse/issues"
   },
   "author": "Fireqtian",
   "license": "MIT",

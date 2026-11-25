@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DeepSeek official file parsing",
-    "description": "Reads PDF, Word, and PowerPoint files through the official DeepSeek Files API, keeping figures and layout when requested, and answers questions about them.",
+    "description": "Reads PDF, Word, PowerPoint, and image files through the official DeepSeek Files API, keeping figures and layout when requested, and answers questions about them.",
     "detail": "docs/DETAIL.md"
   }
 }

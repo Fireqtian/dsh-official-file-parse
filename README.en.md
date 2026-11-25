@@ -31,7 +31,8 @@ The plugin uses the same credential as the Harness model requests, in order: the
 | `baseURL` | `https://api.deepseek.com` |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` |
 | `model` | `deepseek-flash` |
-| `maxTokens` | `8192` |
+| `reasoningEffort` | `low` (`default`/`none`/`low`/`high`/`max`; `default` omits the field) |
+| `maxTokens` | `32768` (shared with thinking tokens) |
 | `timeoutMs` | `300000` |
 | `defaultPurpose` | `rich_layout_recognition` |
 
@@ -39,13 +40,16 @@ The plugin uses the same credential as the Harness model requests, in order: the
 
 `POST /anthropic/v1/files` with multipart (`purpose` before `file`) parses the file server-side and returns a `file_id`; `POST /anthropic/v1/messages` then sends `{type:'document', source:{type:'file', file_id}}` with the question and the `files-api-2025-04-14` beta header. Uploads are cached by file digest, purpose, and API host, so a document is never parsed twice; a stale id is retried once.
 
+Thinking is enabled by default at effort `high` and shares `max_tokens` with the answer, so the request sets `reasoning: {effort}` (default `low`) and exposes `stop_reason`: a `max_tokens` stop marks the result as truncated instead of passing a half answer off as complete, and an answer-less stop retries once with thinking disabled before failing with an output-budget error.
+
 The adapter currently accepts only `text` and `image` content blocks, and the API does not expose parsed text for download, so the plugin answers through one isolated Messages call and returns the answer as the tool result.
 
 ## Limits
 
-- ≤ 100 MiB and ≤ 1000 pages per file; PDF / DOC / DOCX / PPT / PPTX only.
+- ≤ 100 MiB and ≤ 1000 pages per file for PDF / DOC / DOCX / PPT / PPTX and images (PNG, JPEG, WebP, GIF, BMP, TIFF); plain text, tables and ebooks go through `user_data` (≤ 32 MiB, not billed for parsing).
 - Parsing is billed per page at upload; questions are billed as tokens.
 - Figure cropping is best effort: the provider does not guarantee every figure is detected.
+- Parse results cannot be downloaded, so the cropped figures never leave the provider's context.
 
 ## Development
 

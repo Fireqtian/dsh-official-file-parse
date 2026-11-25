@@ -49,9 +49,9 @@ document_files(action="delete", fileId="file-api-...")
 
 | 参数 | 说明 |
 | --- | --- |
-| `path` | 绝对路径，或相对会话工作目录的路径；支持 PDF / DOC / DOCX / PPT / PPTX |
+| `path` | 绝对路径，或相对会话工作目录的路径；支持 PDF / DOC / DOCX / PPT / PPTX、图片（PNG / JPEG / WebP / GIF / BMP / TIFF），以及 TXT / MD / CSV / JSON / XLSX / XLS / EPUB / MOBI |
 | `question` | 想问的问题；省略时做整体总结 |
-| `purpose` | `rich_layout_recognition`（默认）或 `text_recognition` |
+| `purpose` | `rich_layout_recognition`（默认）或 `text_recognition`；纯文本、表格与电子书固定走 `user_data` |
 | `model` | 回答文档问题的模型，默认 `deepseek-flash` |
 
 ## 配置
@@ -63,7 +63,8 @@ document_files(action="delete", fileId="file-api-...")
 | `baseURL` | `https://api.deepseek.com` | 官方 API 地址 |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | 凭证引用名 |
 | `model` | `deepseek-flash` | 回答模型 |
-| `maxTokens` | `8192` | 单次回答上限 |
+| `reasoningEffort` | `low` | 思考强度：`default`/`none`/`low`/`high`/`max`。`default` 表示不传该字段（服务端默认 `high`） |
+| `maxTokens` | `32768` | 单次输出上限，**含思考 token**；太小会让长文档问题只思考不回答 |
 | `timeoutMs` | `300000` | 单次上传/问答超时（解析可能较慢） |
 | `defaultPurpose` | `rich_layout_recognition` | 未指定时的解析模式 |
 
@@ -71,6 +72,8 @@ document_files(action="delete", fileId="file-api-...")
 
 - `POST /anthropic/v1/files`：multipart 上传，`purpose` 必须排在 `file` 之前；服务端解析完成后才返回 `file_id`。
 - `POST /anthropic/v1/messages`：内容块 `{type:'document', source:{type:'file', file_id}}` + 问题文本，`anthropic-beta: files-api-2025-04-14`。
+- 请求体带 `reasoning: {effort}`：思考默认开启且强度 `high`，会与正文共享 `max_tokens`。默认降到 `low`，并把预算提到 32768。
+- 解析响应的 `stop_reason`：为 `max_tokens` 时结果里标注"回答被截断"，不再把半句话当完整答案；若思考耗尽预算导致**一个字都没有**，自动关闭思考重试一次，仍为空才报错，并在错误里说明这是输出预算问题而非文档不可读。
 - 按 `sha256(文件内容) + purpose + API 主机` 缓存 `file_id`（`~/.dsh/dsh-official-file-parse/files.json`），同一文件不会重复解析计费；缓存 id 失效时自动重传一次。
 - 文件通过 Harness 的 `ctx.fs` 读取（遵守沙箱与观察策略），仅在服务缺失时回退 Node `fs`。
 - 只依赖 Node 内置模块，不引入任何 `@deepseek-ai/*` 依赖，避免插件与宿主版本耦合。
@@ -79,9 +82,10 @@ document_files(action="delete", fileId="file-api-...")
 
 ## 限制
 
-- 单文件 ≤ 100 MiB、≤ 1000 页；不支持纯文本/Markdown/图片（直接读文件或用图片工具更快）。
+- 单文件 ≤ 100 MiB、≤ 1000 页（纯文本/表格/电子书走 `user_data`，原件 ≤ 32 MiB、文本 ≤ 8 MiB，不计解析费）。
 - 上传时按页计费，之后每次提问按 token 计费。
 - 官方说明：文档里的图由版面分析自动裁出，**不保证每张图都被识别**；未裁出的图模型看不到。
+- **官方不提供解析结果下载**：裁出的图只存在于模型上下文里，插件拿不到像素，只能把模型读后的文字交回会话。
 - 上传的文档保存在 DeepSeek 账号下，用 `document_files` 删除。
 
 ## 开发

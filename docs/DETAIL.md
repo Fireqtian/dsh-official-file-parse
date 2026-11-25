@@ -29,7 +29,8 @@ Harness 的 DeepSeek 适配器目前只接受 `text` 与 `image` 两种内容块
 | `baseURL` | `https://api.deepseek.com` | 官方 API 地址 |
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | 凭证引用名，从 Harness 凭证库解析 |
 | `model` | `deepseek-flash` | 回答文档问题的模型 |
-| `maxTokens` | `8192` | 单次回答上限 |
+| `reasoningEffort` | `low` | 思考强度（`default`/`none`/`low`/`high`/`max`）；`default` 不传字段，服务端按 `high` 处理 |
+| `maxTokens` | `32768` | 单次输出上限，**包含思考 token** |
 | `timeoutMs` | `300000` | 单次上传/问答的超时（解析本身可能耗时较久） |
 | `defaultPurpose` | `rich_layout_recognition` | 未指定时的解析模式 |
 
@@ -41,10 +42,21 @@ Harness 的 DeepSeek 适配器目前只接受 `text` 与 `image` 两种内容块
 
 ## 限制与计费
 
-- 单文件最大 100 MiB、最多 1000 页；只接受 PDF、DOC、DOCX、PPT、PPTX。纯文本、Markdown、图片不经过此 API，用普通读文件/图片工具即可。
+- 单文件最大 100 MiB、最多 1000 页；接受 PDF、DOC、DOCX、PPT、PPTX 与图片（PNG、JPEG、WebP、GIF、BMP、TIFF）。纯文本、表格与电子书（TXT、MD、CSV、JSON、XLSX、XLS、EPUB、MOBI）走 `user_data` 通道：原件 ≤ 32 MiB、文本 ≤ 8 MiB，上传不计解析费。
 - 上传时按页计费，之后每次提问只计 token。同一文件（内容 sha256 + 解析模式 + API 主机相同）会复用已上传的 `file_id`，不重复解析；删除缓存或换模式会重新上传。
 - 官方说明：文档里的图由版面分析自动裁出，**不保证每张图都被识别**；未裁出的图模型看不到。需要逐图确认时，用 `rich_layout_recognition` 并在问题里点名图号。
 - 上传缓存位于 `~/.dsh/dsh-official-file-parse/files.json`，只保存 `file_id` 与文件名，不保存文档内容。
+
+## 已知失败模式：空回答与截断
+
+`deepseek-flash` 默认开启思考模式、强度 `high`，思考 token 与正文共享 `max_tokens`。旧版本把预算定为 8192 又不传 `reasoning`，于是问长文档时会出现两种症状：
+
+- 思考把预算用光，正文一个字都没写：流里没有任何 `text_delta`，旧实现报 `DeepSeek returned an empty answer for this document.`——把**输出预算问题**误报成**文档不可读**；
+- 正文写了一半撞上限：`stop_reason: max_tokens`，旧实现静默返回半句话，看起来像完整答案。
+
+现在的处理：请求带 `reasoning: {effort}`（默认 `low`，可设 `default` 恢复服务端默认）、`maxTokens` 提到 32768、读取 `stop_reason`；截断时在结果里标注 `⚠️`，正文为空时自动以 `effort: none` 重试一次，仍为空才报错，错误信息带上 `stop_reason` 与 `maxTokens`。
+
+官方文档里有一条值得记住的反例：上下文超长会返回 HTTP 400，**不会**静默截断文档内容。所以"空回答"不可能是"文档太大读不下"，只可能是生成侧把预算花掉了。
 
 ## 验证情况
 

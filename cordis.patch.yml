@@ -5,6 +5,7 @@
         baseURL: https://api.deepseek.com
         apiKeyEnv: DEEPSEEK_API_KEY
         model: deepseek-flash
-        maxTokens: 8192
+        reasoningEffort: low
+        maxTokens: 32768
         timeoutMs: 300000
         defaultPurpose: rich_layout_recognition

@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DeepSeek 官方文件解析",
-    "description": "通过官方 DeepSeek Files API 解析 PDF、Word、PowerPoint 文件，可保留图表与版面，并基于解析结果回答问题。",
+    "description": "通过官方 DeepSeek Files API 解析 PDF、Word、PowerPoint 与图片文件，可保留图表与版面，并基于解析结果回答问题。",
     "detail": "docs/DETAIL.md"
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-official-file-parse",
-  "version": "0.1.0",
-  "description": "Official DeepSeek document parsing (Files API) for DeepSeek Harness: parse PDF/Word/PowerPoint with figures and layout kept, then answer questions about them.",
+  "version": "0.2.0",
+  "description": "Official DeepSeek document parsing (Files API) for DeepSeek Harness: parse PDF/Word/PowerPoint/images with figures and layout kept, then answer questions about them.",
   "type": "module",
   "main": "index.js",
   "exports": {

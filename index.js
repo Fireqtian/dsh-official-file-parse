@@ -30,19 +30,38 @@ const DEFAULTS = {
   baseURL: 'https://api.deepseek.com',
   apiKeyEnv: 'DEEPSEEK_API_KEY',
   model: 'deepseek-flash',
-  maxTokens: 8192,
+  // Thinking is on by default at effort "high", and it shares max_tokens with
+  // the answer: at 8192 a long document question can spend the whole budget on
+  // reasoning and return no text at all. "low" keeps a margin for the answer.
+  reasoningEffort: 'low',
+  maxTokens: 32768,
   timeoutMs: 300_000,
   defaultPurpose: 'rich_layout_recognition',
 }
 
+/** Values accepted by the Anthropic-format `reasoning.effort` field. */
+const REASONING_EFFORTS = ['default', 'none', 'low', 'high', 'max']
+
 /** Files API limits from the official document-parsing guide. */
 const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024
 
-/** Purposes accepted by the Files API for document parsing. */
-const PURPOSES = ['text_recognition', 'rich_layout_recognition']
+/** The plain-text/table/ebook path caps the source file at 32 MiB. */
+const MAX_PLAIN_BYTES = 32 * 1024 * 1024
 
-/** Extensions the parsing endpoint accepts. */
-const DOCUMENT_EXTS = new Set(['.pdf', '.doc', '.docx', '.ppt', '.pptx'])
+/** Purposes accepted by the Files API. */
+const PURPOSES = ['text_recognition', 'rich_layout_recognition', 'user_data']
+
+/** Extensions the parsing endpoint accepts (documents and images). */
+const PARSED_EXTS = new Set([
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff',
+])
+
+/** Extensions uploaded with `purpose: user_data`; converted to Markdown, not billed. */
+const PLAIN_EXTS = new Set(['.txt', '.md', '.csv', '.json', '.xlsx', '.xls', '.epub', '.mobi'])
+
+/** Every extension the tool accepts. */
+const DOCUMENT_EXTS = new Set([...PARSED_EXTS, ...PLAIN_EXTS])
 
 const MIME_BY_EXT = {
   '.pdf': 'application/pdf',
@@ -50,6 +69,22 @@ const MIME_BY_EXT = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.ppt': 'application/vnd.ms-powerpoint',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xls': 'application/vnd.ms-excel',
+  '.epub': 'application/epub+zip',
+  '.mobi': 'application/x-mobipocket-ebook',
 }
 
 /** Files API beta header required by the Anthropic-compatible surface. */
@@ -66,6 +101,7 @@ export function resolveConfig(config) {
     baseURL,
     apiKeyEnv: typeof raw.apiKeyEnv === 'string' && raw.apiKeyEnv !== '' ? raw.apiKeyEnv : DEFAULTS.apiKeyEnv,
     model: typeof raw.model === 'string' && raw.model !== '' ? raw.model : DEFAULTS.model,
+    reasoningEffort: REASONING_EFFORTS.includes(raw.reasoningEffort) ? raw.reasoningEffort : DEFAULTS.reasoningEffort,
     maxTokens: Math.max(256, Math.trunc(num(raw.maxTokens, DEFAULTS.maxTokens))),
     timeoutMs: Math.max(10_000, Math.trunc(num(raw.timeoutMs, DEFAULTS.timeoutMs))),
     defaultPurpose: PURPOSES.includes(raw.defaultPurpose) ? raw.defaultPurpose : DEFAULTS.defaultPurpose,
@@ -250,9 +286,9 @@ export function createClient(config, resolveAuth) {
   /**
    * Ask one question about a parsed document; the file id is sent as a
    * `document` content block exactly as the official chat demo does.
-   * @returns {{ answer: string, model: string, usage: object }}
+   * @returns {{ answer: string, usage: object, stopReason: string, truncated: boolean, thinkingChars: number }}
    */
-  async function ask({ fileId, question, model, signal }) {
+  async function ask({ fileId, question, model, effort = config.reasoningEffort, signal }) {
     const body = {
       model,
       max_tokens: config.maxTokens,
@@ -267,6 +303,8 @@ export function createClient(config, resolveAuth) {
         },
       ],
     }
+    // "default" omits the field, so the provider applies its own effort (high).
+    if (effort !== 'default') body.reasoning = { effort }
     const response = await fetch(messagesURL, {
       method: 'POST',
       headers: {
@@ -282,12 +320,22 @@ export function createClient(config, resolveAuth) {
 
     let answer = ''
     let usage = {}
+    let stopReason = ''
+    let thinkingChars = 0
     let failure = null
     for await (const { payload } of readServerSentEvents(response.body)) {
       if (payload?.type === 'content_block_delta' && payload?.delta?.type === 'text_delta') {
         answer += String(payload.delta.text ?? '')
-      } else if (payload?.type === 'message_delta' && payload?.usage) {
-        usage = { inputTokens: Number(payload.usage.input_tokens ?? 0), outputTokens: Number(payload.usage.output_tokens ?? 0) }
+      } else if (payload?.type === 'content_block_delta' && payload?.delta?.type === 'thinking_delta') {
+        // Thinking shares max_tokens with the answer. A budget spent here is the
+        // reason an answer can come back empty on an otherwise healthy document.
+        thinkingChars += String(payload.delta.thinking ?? '').length
+      } else if (payload?.type === 'message_delta') {
+        if (payload?.usage) {
+          usage = { inputTokens: Number(payload.usage.input_tokens ?? 0), outputTokens: Number(payload.usage.output_tokens ?? 0) }
+        }
+        const reason = payload?.delta?.stop_reason
+        if (typeof reason === 'string' && reason !== '') stopReason = reason
       } else if (payload?.type === 'error') {
         failure = new Error(`DeepSeek Messages API error: ${String(payload?.error?.message ?? 'unknown error')}`)
       } else if (payload?.type === 'message_stop') {
@@ -295,8 +343,13 @@ export function createClient(config, resolveAuth) {
       }
     }
     if (failure !== null) throw failure
-    if (answer.trim() === '') throw new Error('DeepSeek returned an empty answer for this document.')
-    return { answer: answer.trim(), usage }
+    return {
+      answer: answer.trim(),
+      usage,
+      stopReason,
+      truncated: stopReason === 'max_tokens',
+      thinkingChars,
+    }
   }
 
   return { upload, listFiles, deleteFile, ask }
@@ -306,6 +359,27 @@ export function createClient(config, resolveAuth) {
 function looksLikeStaleFileId(message) {
   return /file.{0,40}(?:not[_ -]?found|expired|deleted|invalid|not created under)/iu.test(message)
     || /(?:invalid|missing).{0,20}file[_ -]?(?:id|api)/iu.test(message)
+}
+
+/**
+ * Ask once with the configured reasoning effort, then retry with thinking off
+ * when the budget went to reasoning. A `max_tokens` stop means the provider cut
+ * generation; when it produces no text at all, the retry is what turns a
+ * confusing "empty answer" into a usable result.
+ */
+export async function askWithRecovery(state, { fileId, question, model, signal }) {
+  const first = await state.client.ask({ fileId, question, model, signal })
+  if (first.answer !== '' && !first.truncated) return { result: first, retried: false }
+
+  const retry = await state.client.ask({ fileId, question, model, effort: 'none', signal })
+  if (retry.answer !== '') return { result: retry, retried: true }
+  if (first.answer !== '') return { result: first, retried: true }
+
+  throw new Error(
+    `DeepSeek produced no answer text (stop_reason "${first.stopReason || 'unknown'}", max_tokens ${state.config.maxTokens}).`
+    + ' The upload and parse succeeded, so this is an output-budget problem, not an unreadable document:'
+    + ' raise maxTokens, set reasoningEffort to "none", or ask a narrower question.',
+  )
 }
 
 /** A finite number, or the fallback when the provider field is missing or not numeric. */
@@ -328,24 +402,24 @@ function formatBytes(bytes) {
 }
 
 /** Read one document body through the harness filesystem when available. */
-async function readDocumentBytes(ctx, inputPath, cwd, signal) {
+async function readDocumentBytes(ctx, inputPath, cwd, signal, maxBytes = MAX_DOCUMENT_BYTES) {
   const fs = ctx.get('fs')
   if (fs !== undefined && typeof fs.resolve === 'function' && typeof fs.readBytes === 'function') {
     const target = await fs.resolve(inputPath, { cwd, signal })
     const info = await fs.stat(target, signal)
     if (info === undefined) throw new Error(`No such file: ${inputPath}`)
     const size = Number(info.size ?? info.bytes ?? 0)
-    if (size > MAX_DOCUMENT_BYTES) {
-      throw new Error(`${basename(inputPath)} is ${formatBytes(size)}; the parsing API accepts at most 100 MiB.`)
+    if (size > maxBytes) {
+      throw new Error(`${basename(inputPath)} is ${formatBytes(size)}; the API accepts at most ${formatBytes(maxBytes)} for this file type.`)
     }
-    const bytes = await fs.readBytes(target, signal, MAX_DOCUMENT_BYTES)
+    const bytes = await fs.readBytes(target, signal, maxBytes)
     return { bytes: new Uint8Array(bytes), size, name: basename(inputPath) }
   }
   const absolute = isAbsolute(inputPath) ? inputPath : resolvePath(cwd, inputPath)
   const info = await stat(absolute)
   if (!info.isFile()) throw new Error(`Not a file: ${inputPath}`)
-  if (info.size > MAX_DOCUMENT_BYTES) {
-    throw new Error(`${basename(absolute)} is ${formatBytes(info.size)}; the parsing API accepts at most 100 MiB.`)
+  if (info.size > maxBytes) {
+    throw new Error(`${basename(absolute)} is ${formatBytes(info.size)}; the API accepts at most ${formatBytes(maxBytes)} for this file type.`)
   }
   return { bytes: new Uint8Array(await readFile(absolute)), size: info.size, name: basename(absolute) }
 }
@@ -440,17 +514,22 @@ function documentQaTool(state) {
   return {
     name: 'document_qa',
     description:
-      'Read a local PDF, Word, or PowerPoint file through the official DeepSeek document-parsing API,'
-      + ' then answer a question about it. The provider parses the file once on upload:'
+      'Read a local PDF, Word, PowerPoint, or image file through the official DeepSeek document-parsing API,'
+      + ' or a plain-text, table, or ebook file through its free user_data path, then answer a question about it.'
+      + ' The provider parses the file once on upload:'
       + ' "rich_layout_recognition" keeps figures, charts, and their positions; "text_recognition" keeps text only.'
-      + ' Use it for questions that need the document\'s figures or layout, not for plain text files or images.',
+      + ' Parse results cannot be downloaded, so a question through this tool is the only way to learn what a'
+      + ' document contains beyond its raw text. The tool returns text: it never hands back the document images.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         path: {
           type: 'string',
-          description: 'Absolute path, or a path relative to the session working directory. PDF, DOC/DOCX, PPT/PPTX.',
+          description:
+            'Absolute path, or a path relative to the session working directory.'
+            + ' PDF, DOC/DOCX, PPT/PPTX, an image (PNG/JPEG/WebP/GIF/BMP/TIFF),'
+            + ' or TXT/MD/CSV/JSON/XLSX/XLS/EPUB/MOBI.',
         },
         question: {
           type: 'string',
@@ -459,7 +538,9 @@ function documentQaTool(state) {
         purpose: {
           type: 'string',
           enum: PURPOSES,
-          description: 'Parse mode. Defaults to rich_layout_recognition; text_recognition is cheaper and drops figures.',
+          description:
+            'Parse mode. Defaults to rich_layout_recognition; text_recognition is cheaper and drops figures.'
+            + ' Plain-text, table and ebook files always use user_data.',
         },
         model: {
           type: 'string',
@@ -480,65 +561,103 @@ function documentQaTool(state) {
           purpose: { type: 'string' },
           model: { type: 'string' },
           reusedUpload: { type: 'boolean' },
+          truncated: { type: 'boolean' },
+          stopReason: { type: 'string' },
+          retriedWithoutThinking: { type: 'boolean' },
         },
-        required: ['answer', 'fileId', 'filename', 'bytes', 'purpose', 'model', 'reusedUpload'],
+        required: [
+          'answer', 'fileId', 'filename', 'bytes', 'purpose', 'model', 'reusedUpload',
+          'truncated', 'stopReason', 'retriedWithoutThinking',
+        ],
       },
       render(_args, value) {
+        const notes = [
+          value.reusedUpload ? 'reused upload' : '',
+          value.retriedWithoutThinking ? 'retried without thinking' : '',
+        ].filter((note) => note !== '').join(', ')
         return [{
           type: 'text',
-          text: `${value.answer}\n\n(parsed ${value.filename}, ${formatBytes(value.bytes)}, ${value.purpose}`
-            + `${value.reusedUpload ? ', reused upload' : ''}; answered by ${value.model})`,
+          text: `${value.answer}`
+            + `${value.truncated ? '\n\n⚠️ The answer hit max_tokens and is incomplete. Raise maxTokens or ask a narrower question.' : ''}`
+            + `\n\n(parsed ${value.filename}, ${formatBytes(value.bytes)}, ${value.purpose}`
+            + `${notes === '' ? '' : `, ${notes}`}; answered by ${value.model})`,
         }]
       },
     },
     async execute(args, exec) {
       const inputPath = String(args?.path ?? '').trim()
       if (inputPath === '') throw new Error('path is required.')
-      const purpose = PURPOSES.includes(args?.purpose) ? args.purpose : state.config.defaultPurpose
       const extension = extname(inputPath).toLowerCase()
       if (!DOCUMENT_EXTS.has(extension)) {
-        throw new Error(`Unsupported document type "${extension || '(none)'}": use PDF, DOC/DOCX, or PPT/PPTX.`)
+        throw new Error(
+          `Unsupported file type "${extension || '(none)'}": use PDF, DOC/DOCX, PPT/PPTX,`
+          + ' an image (PNG, JPEG, WebP, GIF, BMP, TIFF), or TXT, MD, CSV, JSON, XLSX, XLS, EPUB, MOBI.',
+        )
       }
+
+      // Plain text, tables and ebooks take the free `user_data` path; the two
+      // recognition modes only exist for parsed documents and images.
+      const plain = PLAIN_EXTS.has(extension)
+      if (plain && args?.purpose !== undefined && args.purpose !== 'user_data') {
+        throw new Error(
+          `"${extension}" files are uploaded with purpose "user_data";`
+          + ' text_recognition and rich_layout_recognition only apply to documents and images.',
+        )
+      }
+      if (!plain && args?.purpose === 'user_data') {
+        throw new Error(`purpose "user_data" only applies to plain-text, table and ebook files, not "${extension}".`)
+      }
+      const purpose = plain
+        ? 'user_data'
+        : (PURPOSES.includes(args?.purpose) ? args.purpose : state.config.defaultPurpose)
       const question = typeof args?.question === 'string' && args.question.trim() !== ''
         ? args.question.trim()
         : 'Summarize this document in detail: its purpose, its structure, and the key claims or data it contains.'
       const model = typeof args?.model === 'string' && args.model !== '' ? args.model : state.config.model
       const cwd = state.workingDirectoryOf(exec)
-      const { bytes, name } = await readDocumentBytes(state.ctx, inputPath, cwd, exec?.signal)
+      const { bytes, name } = await readDocumentBytes(
+        state.ctx,
+        inputPath,
+        cwd,
+        exec?.signal,
+        plain ? MAX_PLAIN_BYTES : MAX_DOCUMENT_BYTES,
+      )
       const upload = await ensureUploaded(state, { bytes, filename: name, purpose, signal: exec?.signal })
+      const askAbout = async (fileId) => askWithRecovery(state, { fileId, question, model, signal: exec?.signal })
 
-      let answer
+      let asked
       try {
-        ({ answer } = await state.client.ask({
-          fileId: upload.fileId,
-          question,
-          model,
-          signal: exec?.signal,
-        }))
+        asked = await askAbout(upload.fileId)
       } catch (error) {
         if (!upload.reused || !looksLikeStaleFileId(String(error?.message ?? ''))) throw error
         await forgetUpload(state, { bytes, purpose })
         const fresh = await ensureUploaded(state, { bytes, filename: name, purpose, signal: exec?.signal })
-        ({ answer } = await state.client.ask({ fileId: fresh.fileId, question, model, signal: exec?.signal }))
+        asked = await askAbout(fresh.fileId)
         return {
-          answer,
+          answer: asked.result.answer,
           fileId: fresh.fileId,
           filename: fresh.filename,
           bytes: bytes.length,
           purpose,
           model,
           reusedUpload: false,
+          truncated: asked.result.truncated,
+          stopReason: asked.result.stopReason,
+          retriedWithoutThinking: asked.retried,
         }
       }
 
       return {
-        answer,
+        answer: asked.result.answer,
         fileId: upload.fileId,
         filename: upload.filename,
         bytes: bytes.length,
         purpose,
         model,
         reusedUpload: upload.reused,
+        truncated: asked.result.truncated,
+        stopReason: asked.result.stopReason,
+        retriedWithoutThinking: asked.retried,
       }
     },
   }
